@@ -1,0 +1,51 @@
+name: Deploy - Production
+
+# Deploy manual/gatilhado por release. Ambiente "production" configurado em
+# Settings > Environments com required reviewers, funcionando como o "approval gate".
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - name: Login no registry de imagens
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build & push da imagem Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY }}/casecellshop:production-${{ github.sha }}
+            ${{ secrets.REGISTRY }}/casecellshop:latest
+
+      - name: Deploy no ambiente de produção
+        env:
+          DEPLOY_TARGET: ${{ secrets.PRODUCTION_DEPLOY_TARGET }}
+        run: |
+          echo "Placeholder: comando real do provedor de produção"
+          echo "(ex.: aws ecs update-service, gcloud run deploy, kubectl set image, ssh + docker pull/restart)."
