@@ -1,0 +1,201 @@
+openapi: 3.0.0
+info:
+  title: CaseCellShop API
+  version: 1.0.0
+  description: >
+    API simulada da CaseCellShop: vitrine com cache, checkout assíncrono com
+    idempotência e prevenção de overselling, e consulta/retry de pedidos.
+paths:
+  /products:
+    get:
+      summary: Lista catálogo com cache (TTL 30s)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+
+  /checkout:
+    post:
+      summary: Inicia checkout assíncrono
+      parameters:
+        - in: header
+          name: x-idempotency-key
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: x-correlation-id
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '202':
+          description: Accepted (Assíncrono) — pedido gravado como PENDING e enviado para a fila.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutAccepted'
+        '200':
+          description: Replay idempotente — mesma x-idempotency-key já usada anteriormente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdempotentReplay'
+        '400':
+          description: Header x-idempotency-key ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Sem estoque (overselling prevenido).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/{orderId}/status:
+    get:
+      summary: Consulta status do pedido
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatus'
+        '404':
+          description: Pedido não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/{orderId}/retry:
+    post:
+      summary: Runbook de suporte — reprocessa manualmente um pedido em DLQ (status FAILED)
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Pedido voltou para PENDING e foi reenviado à fila.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatus'
+        '404':
+          description: Pedido não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Pedido não está em FAILED, retry manual não se aplica.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics:
+    get:
+      summary: Snapshot de métricas (counters, gauges e histograms simulados)
+      responses:
+        '200':
+          description: OK
+
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          example: case-01
+        name:
+          type: string
+          example: Capinha XYZ
+        price:
+          type: number
+          example: 99.9
+        stock:
+          type: integer
+          example: 10
+
+    CheckoutRequest:
+      type: object
+      required:
+        - productId
+      properties:
+        productId:
+          type: string
+          example: case-01
+        simulateFailure:
+          type: boolean
+          description: Uso apenas para teste/demo — força falha simulada no worker para exercitar retry e DLQ.
+          default: false
+
+    CheckoutAccepted:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACCEPTED]
+
+    IdempotentReplay:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED]
+        idempotent:
+          type: boolean
+          enum: [true]
+
+    OrderStatus:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED]
+        attempts:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: OUT_OF_STOCK
+        message:
+          type: string
+          example: Out of stock (Overselling prevented)
