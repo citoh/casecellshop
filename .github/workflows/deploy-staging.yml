@@ -1,0 +1,48 @@
+name: Deploy - Staging
+
+# Deploy automático a cada merge em main.
+# Ambiente "staging" configurado em Settings > Environments (sem reviewers obrigatórios).
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - name: Login no registry de imagens
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build & push da imagem Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.REGISTRY }}/casecellshop:staging-${{ github.sha }}
+
+      - name: Deploy no ambiente de staging
+        env:
+          DEPLOY_TARGET: ${{ secrets.STAGING_DEPLOY_TARGET }}
+        run: |
+          echo "Placeholder: comando real do provedor de staging"
+          echo "(ex.: aws ecs update-service, gcloud run deploy --tag staging, kubectl set image, ssh + docker pull/restart)."
